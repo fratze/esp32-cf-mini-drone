@@ -1,5 +1,4 @@
-// 时间相关函数
-// Time related functions
+// Time functions
 
 float loopRate; // Hz
 

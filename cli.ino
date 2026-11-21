@@ -23,44 +23,44 @@ extern int mode;
 extern bool armed;
 
 const char* motd =
-"CLI命令菜单，输入相应命令，回车后执行:\n"
-"help - 帮助\n"
-"p - 显示所有参数\n"
-"p <name> - 显示指定参数\n"
-"p <name> <value> - 设置参数\n"
-"p MOT_PIN_FL 14 - 参数设置示例，前左电机引脚为14\n"
-"preset - 重置参数存储，设置参数后运行此命令\n"
-"mfr, mfl, mrr, mrl - 测试马达 (马达不受算法影响运转，为了安全不要装桨叶！！！)\n"
-"ca - 校准陀螺仪加速度计\n"
-"ps - 显示pitch/roll/yaw姿态\n"
-"cr - 校准RC遥控器\n"
-"rc - 显示RC遥控数据\n"
-"wifi - 显示WiFi信息\n"
-"ap <ssid> <password> - 配置AP模式SSID和密码\n"
-"sta <ssid> <password> - 配置STA客户端模式\n"
-"raw/stab/acro/auto - 飞行模式设定\n"
-"arm - 解锁无人机\n"
-"disarm - 锁定无人机\n"
-"psq - 显示姿态四元数\n"
-"imu - 显示IMU数据\n"
-"time - 显示时间信息\n"
-"mot - 显示motor输出\n"
-"sys - 显示系统info信息\n"
-"log [dump] - 打印日志\n"
-"reboot - 重启无人机\n"
-"reset - 重置无人机\n";
+"Type a command and press Enter.\n"
+"help - Show this menu\n"
+"p - List all parameters\n"
+"p <name> - Show a parameter\n"
+"p <name> <value> - Set a parameter\n"
+"p MOT_PIN_FL 14 - Example: set the front left motor pin to 14\n"
+"preset - Erase saved settings and restart with defaults\n"
+"mfr, mfl, mrr, mrl - Test a motor directly. Remove all propellers first!\n"
+"ca - Calibrate the accelerometer\n"
+"ps - Show pitch, roll and yaw\n"
+"cr - Calibrate the radio controls\n"
+"rc - Show radio channel readings\n"
+"wifi - Show Wi-Fi settings\n"
+"ap <ssid> <password> - Set the access point name and password\n"
+"sta <ssid> <password> - Set the network to join\n"
+"raw/stab/acro/auto - Select a flight mode\n"
+"arm - Arm the motors\n"
+"disarm - Disarm the motors\n"
+"psq - Show orientation as a quaternion\n"
+"imu - Show IMU readings\n"
+"time - Show timing information\n"
+"mot - Show motor outputs\n"
+"sys - Show system information\n"
+"log [dump] - Print the flight log\n"
+"reboot - Restart the flight controller\n"
+"reset - Reset orientation and the gyro bias filter\n";
 
 void print(const char* format, ...) {
-	// 固定 1000 字节缓冲区 + vsnprintf 会静默截断超长内容（例如开机菜单 motd），且截断后连换行符都可能丢失，
-	// 导致后续打印内容拼接到同一行。这里先用栈上小缓冲区尝试格式化，若实际所需长度超过缓冲区，
-	// 再按精确所需大小临时用堆内存重新格式化，避免任何长度的内容被静默截断。
+	// A fixed 1000-byte buffer can cut off long messages such as the startup menu.
+	// Losing the newline also joins messages together. Try a small stack buffer first.
+	// If the message needs more room, allocate the full size and format it again.
 	char stackBuf[512];
 	va_list args, argsCopy;
 	va_start(args, format);
 	va_copy(argsCopy, args);
 	int needed = vsnprintf(stackBuf, sizeof(stackBuf), format, argsCopy);
 	va_end(argsCopy);
-	if (needed < 0) needed = 0; // 编码错误兵底，避免负数导致后续内存分配异常
+	if (needed < 0) needed = 0; // Stop on encoding errors before using the length for allocation.
 
 	char *buf = stackBuf;
 	bool heapAllocated = false;
@@ -70,7 +70,7 @@ void print(const char* format, ...) {
 			vsnprintf(buf, needed + 1, format, args);
 			heapAllocated = true;
 		} else {
-			buf = stackBuf; // 内存不足兵底：退回已截断的栈缓冲区内容
+			buf = stackBuf; // If allocation fails, use the part that fits in the stack buffer.
 		}
 	}
 	va_end(args);
@@ -88,7 +88,7 @@ void print(const char* format, ...) {
 void pause(float duration) {
 	float start = t;
 	while (t - start < duration) {
-		readIMU(); // 长时间阻塞命令（ca/cr）期间也需要持续刷新IMU/姿态，否则打印信息会定格在进入pause前的旧值
+		readIMU(); // Update the IMU and attitude during long calibration commands so readings stay current.
 		step();
 		estimate();
 		handleInput();
@@ -96,7 +96,7 @@ void pause(float duration) {
 		processMavlink();
 #endif
 #if WEB_RC_ENABLED
-		readWebRC(); // 保持 HTTP 服务器在长时间命令（ca/cr）期间持续响应
+		readWebRC(); // Keep serving HTTP requests during calibration.
 #endif
 		delay(50);
 	}
@@ -146,7 +146,7 @@ void doCommand(String str, bool echo = false) {
 		print("landed: %d\n", landed);
 	} else if (command == "arm") {
 		extern bool imuOK;
-		if (!imuOK) { print("IMU故障，禁止解锁！\n"); }
+		if (!imuOK) { print("Cannot arm: IMU fault.\n"); }
 		else armed = true;
 	} else if (command == "disarm") {
 		armed = false;

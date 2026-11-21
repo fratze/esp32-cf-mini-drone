@@ -1,5 +1,4 @@
-// RAM日志记录
-// In-RAM logging
+// Flight log in RAM
 
 #include "vector.h"
 #include "util.h"
@@ -7,7 +6,7 @@
 #include "board_config.h"
 
 #define LOG_RATE 100
-#define LOG_DURATION BOARD_LOG_DURATION  // 缓冲时长：C3=4秒（节省~22KB RAM）/ ESP32&S3=8秒
+#define LOG_DURATION BOARD_LOG_DURATION  // Keep 4 seconds on C3 to save about 22 KB of RAM, or 8 seconds on ESP32 and S3.
 #define LOG_SIZE LOG_DURATION * LOG_RATE
 
 Vector attitudeEuler;

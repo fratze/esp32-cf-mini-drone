@@ -1,21 +1,20 @@
-// 故障安全保护
-// Fail-safe functions
+// Failsafe protection
 
-bool isInverted = false;  // 当前机身是否处于倒置（Z轴cos < INVERTED_COS_THRESHOLD）
+bool isInverted = false;  // True if the aircraft is upside down (Z-axis cosine below INVERTED_COS_THRESHOLD)
 
-float rcLossTimeout = 1;        // RC丢失超时时间（秒），可通过参数 SF_RC_LOSS_TIME 配置
-float descendTime = 10;         // 下降至停机的时间（秒），可通过参数 SF_DESCEND_TIME 配置
-#define WEB_RC_LOSS_TIMEOUT_MS 8000UL  // Web遥控器失联阈值(ms)，必须大于心跳间隔2000ms
+float rcLossTimeout = 1;        // Receiver signal timeout in seconds, set by SF_RC_LOSS_TIME
+float descendTime = 10;         // Seconds from descent to motor stop, set by SF_DESCEND_TIME
+#define WEB_RC_LOSS_TIMEOUT_MS 8000UL  // Web remote timeout in ms. It must exceed the 2000 ms heartbeat interval.
 
-// 倒置保护参数
-#define INVERTED_COS_THRESHOLD -0.7f   // cos(134°)，倾角超过134°视为倒置（留出陀螺漂移裕量）
-#define INVERTED_TIMEOUT        1.5f   // 持续倒置超过1.5秒触发停机
+// Inversion protection settings
+#define INVERTED_COS_THRESHOLD -0.7f   // Cosine of 134°. Treat larger tilt angles as inverted, allowing for gyro drift.
+#define INVERTED_TIMEOUT        1.5f   // Stop the motors after 1.5 seconds upside down.
 
 extern float controlTime;
 extern float controlRoll, controlPitch, controlThrottle, controlYaw;
 
 #if WEB_RC_ENABLED
-// Web RC变量声明
+// Web remote state
 extern bool webRCEnabled;
 extern bool useWebRC;
 extern unsigned long webRCLastUpdate;
@@ -50,7 +49,7 @@ void rcLossFailsafe() {
 	if (controlTime == 0) return; // no RC at all
 	if (!armed) return;
 #if WEB_RC_ENABLED
-	if (isUsingWebRC()) return; // WebRC独立负责其超时（webRCLossFailsafe）
+	if (isUsingWebRC()) return; // The web remote handles its own timeout in webRCLossFailsafe().
 #endif
 	if (t - controlTime > rcLossTimeout) {
 		descend();
@@ -60,7 +59,7 @@ void rcLossFailsafe() {
 // Smooth descend on RC lost
 void descend() {
 	if (mode != AUTO) {
-		// 首次进入：保持当前偏航（仅强制机体水平），清零速率前馈，重置PID积分
+		// On entry, keep the current yaw, level the aircraft, clear rate feedforward and reset the PID integrals.
 		float currentYaw = attitude.getYaw();
 		attitudeTarget = Quaternion::fromEuler(Vector(0, 0, currentYaw));
 		ratesExtra = Vector(0, 0, 0);
@@ -70,11 +69,11 @@ void descend() {
 		rollPID.reset();
 		pitchPID.reset();
 		yawPID.reset();
-		// 钳制推力上限至悬停推力，避免高油门触发时降落时间过长
+		// Limit thrust to hover thrust so high initial throttle does not prolong descent.
 		if (thrustTarget > ALTHOLD_HOVER_THRUST) thrustTarget = ALTHOLD_HOVER_THRUST;
 		mode = AUTO;
 	}
-	// 每帧跟随实际偏航，防止偏航PID在降落过程中重新累积误差
+	// Follow actual yaw each frame to prevent yaw integral buildup during descent.
 	float currentYaw = attitude.getYaw();
 	attitudeTarget = Quaternion::fromEuler(Vector(0, 0, currentYaw));
 
@@ -89,7 +88,7 @@ void descend() {
 void autoFailsafe() {
 	static float roll, pitch, yaw, throttle;
 	
-	// control*已统一涳盖SBUS/MAVLink/WebRC输入，直接检查即可
+	// The control variables already include SBUS, MAVLink and web input.
 	if (roll != controlRoll || pitch != controlPitch || yaw != controlYaw || abs(throttle - controlThrottle) > 0.05) {
 		if (mode == AUTO) mode = STAB;
 	}
@@ -101,14 +100,14 @@ void autoFailsafe() {
 }
 
 #if WEB_RC_ENABLED
-// Web遥控器丢失保护
+// Web remote signal loss
 void webRCLossFailsafe() {
 	if (!webRCEnabled || !useWebRC) return;
 	if (!armed) return;
 
-	// 使用毫秒直接比较，避免整数除法引入的最大1秒误差
+	// Compare milliseconds directly to avoid rounding errors of up to a second.
 	if (millis() - webRCLastUpdate > WEB_RC_LOSS_TIMEOUT_MS) {
-		print("Web RC连接丢失，启动下降\n");
+		print("Web remote signal lost. Starting descent.\n");
 		descend();
 		webRCEnabled = false;
 		useWebRC = false;
@@ -116,14 +115,14 @@ void webRCLossFailsafe() {
 }
 #endif
 
-// 倒置保护：机体Z轴与世界Z轴夹角超过120°持续1.5秒则停机
+// Stop the motors if the aircraft stays beyond the inversion threshold for 1.5 seconds.
 void invertedFailsafe() {
 	if (!armed) {
 		isInverted = false;
 		return;
 	}
 
-	// 取机体Z轴在世界系的Z分量：正立时≈+1，倒置时≈-1
+	// The body Z axis projected onto world Z is about +1 upright or -1 upside down.
 	Vector worldUp = Quaternion::rotateVector(Vector(0, 0, 1), attitude);
 
 	static float invertedStartTime = 0;
@@ -134,7 +133,7 @@ void invertedFailsafe() {
 			armed = false;
 			thrustTarget = 0.0f;
 			invertedStartTime = 0;
-			print("倒置保护：停机\n");
+			print("Drone upside down. Motors stopped.\n");
 		}
 	} else {
 		isInverted = false;
@@ -142,16 +141,16 @@ void invertedFailsafe() {
 	}
 }
 
-// 电池电压保护
-// L1（3.4V）：未解锁禁止解锁（在 control.ino 处理），怠速时自动上锁
-// L2（2.8V）：飞行中仅 LED 快闪告警
-// L3（2.6V）：飞行中自动降落（复用 descend()，速度由 SF_DESCEND_TIME 控制）
+// Battery voltage protection
+// L1 blocks arming in control.ino and disarms at idle.
+// L2 flashes the LED rapidly in flight.
+// L3 triggers automatic descent in flight. SF_DESCEND_TIME sets the descent time.
 void batteryFailsafe() {
 	static bool l3Latched = false;
 	static float lowSince = 0.0f;
 	static float l3LastNotify = 0.0f;
 
-	if (batteryVoltage < VBAT_ABSENT_THRESHOLD) return; // 未接电池，忽略
+	if (batteryVoltage < VBAT_ABSENT_THRESHOLD) return; // Ignore readings when the battery is disconnected.
 	if (!armed) {
 		l3Latched = false;
 		lowSince = 0.0f;
@@ -159,15 +158,15 @@ void batteryFailsafe() {
 		return;
 	}
 
-	// L3 已触发后保持降落，直到上锁，避免阈值附近反复进出
+	// Once L3 triggers, keep descending until disarmed even if the voltage briefly recovers.
 	if (l3Latched) {
 		if (t - l3LastNotify >= 2.0f) {
-			print("电池电量告急(%.2fV)，持续降落，推力%.0f%%\n",
+			print("Critical battery (%.2f V). Landing continues at %.0f%% thrust.\n",
 			      batteryVoltage, thrustTarget * 100.0f);
 #if WEB_RC_ENABLED
 			char warnBuf[64];
 			snprintf(warnBuf, sizeof(warnBuf),
-			         "电池电量告急(%.2fV) 持续降落 推力%.0f%%",
+			         "Critical battery (%.2f V). Landing at %.0f%% thrust.",
 			         batteryVoltage, thrustTarget * 100.0f);
 			setWebRCWarn(warnBuf);
 #endif
@@ -182,14 +181,14 @@ void batteryFailsafe() {
 	bool actionCondition = false;
 	bool criticalAction = false;
 
-	// 飞行中：仅 L3 触发强动作；L2 继续由 LED 告警
+	// In flight, L3 starts descent. L2 only triggers the LED warning.
 	if (flying) {
 		if (batteryVoltage < VBAT_CRITICAL_THRESHOLD) {
 			actionCondition = true;
 			criticalAction = true;
 		}
 	} else {
-		// 解锁怠速：L1 触发自动上锁
+		// At armed idle, L1 disarms the aircraft.
 		if (batteryVoltage < VBAT_WARN_THRESHOLD) {
 			actionCondition = true;
 		}
@@ -207,11 +206,11 @@ void batteryFailsafe() {
 	if (criticalAction) {
 		l3Latched = true;
 		l3LastNotify = 0.0f;
-		print("电池电量告急(%.2fV)，进入自动降落\n", batteryVoltage);
+		print("Critical battery (%.2f V). Starting automatic landing.\n", batteryVoltage);
 #if WEB_RC_ENABLED
 		char warnBuf[64];
 		snprintf(warnBuf, sizeof(warnBuf),
-		         "电池电量告急(%.2fV) 进入自动降落",
+		         "Critical battery (%.2f V). Starting automatic landing.",
 		         batteryVoltage);
 		setWebRCWarn(warnBuf);
 #endif
@@ -221,10 +220,10 @@ void batteryFailsafe() {
 
 	armed = false;
 	thrustTarget = 0.0f;
-	print("电量低(%.2fV)，自动上锁\n", batteryVoltage);
+	print("Low battery (%.2f V). Disarming automatically.\n", batteryVoltage);
 #if WEB_RC_ENABLED
 	char warnBuf[64];
-	snprintf(warnBuf, sizeof(warnBuf), "电量低(%.2fV) 已自动上锁", batteryVoltage);
+	snprintf(warnBuf, sizeof(warnBuf), "Low battery (%.2f V). Motors disarmed.", batteryVoltage);
 	setWebRCWarn(warnBuf);
 #endif
 }

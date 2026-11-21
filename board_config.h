@@ -1,157 +1,156 @@
 #pragma once
 
-// 板级硬件配置
-// Board-level hardware configuration
-// 通过条件编译自动区分 ESP32、ESP32-C3 与 ESP32-S3，无需手动修改
+// Board hardware settings
+// The build target selects the settings for ESP32, ESP32-C3 or ESP32-S3.
 
 #ifdef CONFIG_IDF_TARGET_ESP32C3
 // ---------------------- ESP32C3 ------------------------- 
 
-// ---- 电机引脚（数组顺序：RL, RR, FR, FL，与 motors.ino 中常量定义一致）----
-// GPIO0/1/3/10 均无内置上拉，无 Strapping 功能（C3 的 Strapping 引脚仅 GPIO2/8/9）
+// ---- Motor pins in motors.ino order (rear left, rear right, front right, front left) ----
+// GPIO0/1/3/10 have no built-in pull-ups. The C3 boot strapping pins are GPIO2/8/9.
 #define BOARD_MOTOR_PINS   {3, 10, 0, 1}    // RL=GPIO3, RR=GPIO10, FR=GPIO0, FL=GPIO1
 
-// ---- 电池 ADC ----
-// GPIO2 为 Strapping 引脚（内置弱上拉），但 ADC 输入模式下上拉电阻不影响测量精度
-// 启动后 Strapping 采样完成，analogRead() 调用时引脚为正常输入态
-#define BOARD_VBAT_ADC_PIN 2               // ADC1_CH2（GPIO2）
+// ---- Battery ADC ----
+// GPIO2 is a boot strapping pin with a weak pull-up. The pull-up does not affect ADC measurements in input mode.
+// After startup, analogRead() uses it as a normal input.
+#define BOARD_VBAT_ADC_PIN 2               // ADC1_CH2 (GPIO2)
 
-// ---- RC 串口（CRSF/ELRS 默认；SBUS 可通过参数 RC_PROTOCOL=0 切换）----
-// GPIO9 作 CRSF RX，标准电平，无需反相器
+// ---- RC serial port. The default is CRSF/ELRS. Set RC_PROTOCOL to 0 for SBUS. ----
+// GPIO9 receives standard CRSF levels without an inverter.
 #define BOARD_RC_SERIAL    Serial1
 #define BOARD_RC_RX_PIN    9
-#define BOARD_RC_TX_PIN    -1          // 遥测回传预留，-1=暂不启用
+#define BOARD_RC_TX_PIN    -1          // Reserved for return telemetry. A value of -1 disables it.
 #define BOARD_RC_PROTOCOL  1           // 0=SBUS, 1=CRSF(ELRS)
-#define BOARD_RC_BAUD      420000      // CRSF 标准波特率默认420000；SBUS为100000
+#define BOARD_RC_BAUD      420000      // Default baud rates are 420000 for CRSF and 100000 for SBUS.
 
-// ---- IMU SPI（使用文档 / Arduino pins_arduino.h 默认引脚）----
-// 与 Arduino ESP32-C3 库 SPI 默认定义完全一致，SPI.begin() 可无参调用
-#define BOARD_SPI_SCK      4               // 文档 SCK  = GPIO4
-#define BOARD_SPI_MISO     5               // 文档 MISO = GPIO5
-#define BOARD_SPI_MOSI     6               // 文档 MOSI = GPIO6
-#define BOARD_SPI_CS       7               // 文档 SS   = GPIO7
+// ---- IMU SPI pins from the board documentation and pins_arduino.h ----
+// These match the Arduino ESP32-C3 defaults, so SPI.begin() needs no arguments.
+#define BOARD_SPI_SCK      4               // Default SCK on GPIO4
+#define BOARD_SPI_MISO     5               // Default MISO on GPIO5
+#define BOARD_SPI_MOSI     6               // Default MOSI on GPIO6
+#define BOARD_SPI_CS       7               // Default SS on GPIO7
 
-// ---- I2C（ESP32-C3 默认 I2C 引脚）----
-#define BOARD_I2C_SDA          (-1)        // GPIO8（与 LED 复用，扩展板勿同时启用 LED）
+// ---- Default ESP32-C3 I2C pins ----
+#define BOARD_I2C_SDA          (-1)        // GPIO8 is shared with the LED. Disable the LED when using this pin for I2C.
 #define BOARD_I2C_SCL          (-1)        // GPIO9
 
-// ---- LED：GPIO8，蓝色状态灯，低电平有效 ----
+// ---- Blue status LED on GPIO8, active low ----
 #define BOARD_LED_ENABLED  1
 #define BOARD_LED_PIN      8
-#define BOARD_LED_INVERTED 1               // 低电平点亮
+#define BOARD_LED_INVERTED 1               // Low turns the LED on.
 
-// ---- 性能与资源配置（C3 轻量化）----
-#define BOARD_VBAT_ADC_SAMPLES       8    // ADC采样次数 减少 ADC 阻塞时间，ESP32/S3 默认 16
-#define BOARD_LOG_DURATION           4    // 日志 4 秒缓冲，节省约 22 KB RAM，ESP32/S3 默认 8 秒
-#define BOARD_CONSOLE_LINES          20   // 控制台行数，节省约 7 KB RAM，ESP32/S3 默认 50
-#define BOARD_CONSOLE_LINE_LEN       160  // 每行字符数，ESP32/S3 默认 240
-#define BOARD_MAVLINK_TELEM_FAST_HZ  5    // MAVLink 快速遥测降速，降低 WiFi 占用，ESP32/S3 默认 10 Hz
-#define BOARD_WIFI_ENABLED           0    // C3 单核：WiFi 与飞控共享 CPU，关闭可彻底释放资源给飞控
-#define BOARD_WEB_RC_ENABLED         0    // Web 遥控器依赖 WiFi，随 BOARD_WIFI_ENABLED 同步关闭
+// ---- Resource settings for the C3 ----
+#define BOARD_VBAT_ADC_SAMPLES       8    // Fewer ADC samples reduce blocking time. ESP32 and S3 use 16.
+#define BOARD_LOG_DURATION           4    // A 4-second log saves about 22 KB of RAM. ESP32 and S3 use 8 seconds.
+#define BOARD_CONSOLE_LINES          20   // A shorter console saves about 7 KB of RAM. ESP32 and S3 keep 50 lines.
+#define BOARD_CONSOLE_LINE_LEN       160  // Characters per line. ESP32 and S3 use 240.
+#define BOARD_MAVLINK_TELEM_FAST_HZ  5    // A lower telemetry rate reduces Wi-Fi traffic. ESP32 and S3 use 10 Hz.
+#define BOARD_WIFI_ENABLED           0    // Wi-Fi shares the C3's single CPU with flight control. Disable it to free CPU time.
+#define BOARD_WEB_RC_ENABLED         0    // The web remote needs Wi-Fi, so disable both together.
 
-// ---- 扩展板传感器 ----
+// ---- Expansion board sensors ----
 #undef  EXPANSION_BOARD_ENABLED
-#define EXPANSION_BOARD_ENABLED      0    // C3 硬件引脚冲突，强制禁用扩展板
-#define BOARD_VL53_XSHUT_PIN   (-1)        // VL53L1X XSHUT，暂定 GPIO10
-#define BOARD_PMW_CS_PIN       (-1)        // PMW3901 CS，C3 暂未分配，设为 -1 禁用
+#define EXPANSION_BOARD_ENABLED      0    // Disable the expansion board on C3 because its pins conflict.
+#define BOARD_VL53_XSHUT_PIN   (-1)        // VL53L1X XSHUT, tentatively assigned to GPIO10
+#define BOARD_PMW_CS_PIN       (-1)        // PMW3901 CS has no C3 pin assignment. A value of -1 disables it.
 
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
 // ---------------------- ESP32S3 -------------------------
 
-// ---- 电机引脚：GPIO4-7，远离 FSPI 区（GPIO10-13），无 Strapping 约束 ----
+// ---- Motor pins GPIO4-7 are separate from FSPI (GPIO10-13) and the boot strapping pins. ----
 #define BOARD_MOTOR_PINS   {4, 5, 6, 7}    // RL=GPIO4, RR=GPIO5, FR=GPIO6, FL=GPIO7
 
-// ---- 电池 ADC：GPIO1（ADC1_CH0，S3 的 ADC1 范围为 GPIO1-10）----
+// ---- Battery ADC on GPIO1 (ADC1_CH0). S3 ADC1 covers GPIO1-10. ----
 #define BOARD_VBAT_ADC_PIN 1
 
-// ---- RC 串口（CRSF/ELRS 默认）：GPIO8，与 FSPI/UART0 无冲突 ----
+// ---- RC serial input on GPIO8 (CRSF/ELRS by default), separate from FSPI and UART0 ----
 #define BOARD_RC_SERIAL    Serial2
 #define BOARD_RC_RX_PIN    8
 #define BOARD_RC_TX_PIN    -1
 #define BOARD_RC_PROTOCOL  1
 #define BOARD_RC_BAUD      420000
 
-// ---- IMU SPI：使用 ESP32-S3 FSPI 默认管脚 ----
-// SCK=12（默认），MISO=13（默认），MOSI=11（默认），CS=10（默认 SS）
+// ---- Default ESP32-S3 FSPI pins for the IMU ----
+// Default pins are SCK 12, MISO 13, MOSI 11 and CS 10.
 #define BOARD_SPI_SCK      12
 #define BOARD_SPI_MISO     13
 #define BOARD_SPI_MOSI     11
 #define BOARD_SPI_CS       10
 
-// ---- I2C（ESP32-S3 默认 I2C 引脚）----
+// ---- ESP32-S3 I2C pins ----
 #define BOARD_I2C_SDA          35          // GPIO35
 #define BOARD_I2C_SCL          36          // GPIO36
 
-// ---- LED：新 PCB 接 GPIO2 普通 LED，驱动方式与 ESP32 相同 ----
+// ---- The new PCB uses a standard LED on GPIO2, driven the same way as on ESP32. ----
 #define BOARD_LED_ENABLED  1
 #define BOARD_LED_PIN      2
 #define BOARD_LED_INVERTED 0
 
-// ---- 性能与资源配置（S3 标准）----
-#define BOARD_VBAT_ADC_SAMPLES       16 // ADC采样次数 
-#define BOARD_LOG_DURATION           8  // 日志缓冲秒数
-#define BOARD_CONSOLE_LINES          50  // 控制台行数
-#define BOARD_CONSOLE_LINE_LEN       240  // 每行字符数
-#define BOARD_MAVLINK_TELEM_FAST_HZ  10  // MAVLink 快速遥测降速
+// ---- Standard S3 resource settings ----
+#define BOARD_VBAT_ADC_SAMPLES       16 // ADC samples per reading
+#define BOARD_LOG_DURATION           8  // Seconds of log data to keep
+#define BOARD_CONSOLE_LINES          50  // Number of console lines
+#define BOARD_CONSOLE_LINE_LEN       240  // Characters per line
+#define BOARD_MAVLINK_TELEM_FAST_HZ  10  // Fast MAVLink telemetry rate in Hz
 #define BOARD_WIFI_ENABLED           1
 #define BOARD_WEB_RC_ENABLED         1
 
-// ---- 扩展板传感器 ----
-#define EXPANSION_BOARD_ENABLED      1 // 1 = 启用扩展板传感器探测（BMP388/VL53L1X/QMC5883L/PMW3901）;0 = 跳过探测，所有能力标志保持 false，不影响基础飞行功能
-#define BOARD_VL53_XSHUT_PIN   37      // VL53L1X XSHUT，暂定 GPIO37
-#define BOARD_PMW_CS_PIN       38      // PMW3901 CS，暂定 GPIO38
+// ---- Expansion board sensors ----
+#define EXPANSION_BOARD_ENABLED      1 // Set to 1 to probe BMP388, VL53L1X, QMC5883L and PMW3901. With 0, sensor flags stay false and basic flight control still works.
+#define BOARD_VL53_XSHUT_PIN   37      // VL53L1X XSHUT, tentatively assigned to GPIO37
+#define BOARD_PMW_CS_PIN       38      // PMW3901 CS, tentatively assigned to GPIO38
 
-#else  // ---- ESP32 默认配置 ----
-// ---------------------- 默认ESP32 -------------------------
+#else  // ---- Default ESP32 configuration ----
+// ---------------------- ESP32 defaults -------------------------
 
-#define BOARD_MOTOR_PINS   {12, 13, 15, 14}  // 电机引脚 RL=GPIO12, RR=GPIO13, FR=GPIO15, FL=GPIO14
+#define BOARD_MOTOR_PINS   {12, 13, 15, 14}  // Motor pins RL=GPIO12, RR=GPIO13, FR=GPIO15, FL=GPIO14
 
-#define BOARD_VBAT_ADC_PIN 36              // 电池电压 ADC 引脚（GPIO36，仅输入）
+#define BOARD_VBAT_ADC_PIN 36              // Battery voltage ADC on GPIO36 (input only)
 
-#define BOARD_RC_SERIAL    Serial2         // RC 串口（CRSF/ELRS 默认）
-#define BOARD_RC_RX_PIN    4               // RC RX 引脚（GPIO4）
-#define BOARD_RC_TX_PIN    -1              // 遥测回传预留，-1=暂不启用
+#define BOARD_RC_SERIAL    Serial2         // RC serial port (CRSF/ELRS by default)
+#define BOARD_RC_RX_PIN    4               // RC input on GPIO4
+#define BOARD_RC_TX_PIN    -1              // Reserved for return telemetry. A value of -1 disables it.
 #define BOARD_RC_PROTOCOL  1               // 0=SBUS, 1=CRSF(ELRS)
-#define BOARD_RC_BAUD      420000          // CRSF 标准波特率默认420000；SBUS为100000
+#define BOARD_RC_BAUD      420000          // Default baud rates are 420000 for CRSF and 100000 for SBUS.
 
-#define BOARD_SPI_SCK      18              // SPI 时钟（GPIO18）
-#define BOARD_SPI_MISO     19              // SPI 主入从出（GPIO19）
-#define BOARD_SPI_MOSI     23              // SPI 主出从入（GPIO23）
-#define BOARD_SPI_CS       5               // SPI 片选（GPIO5）
+#define BOARD_SPI_SCK      18              // SPI clock on GPIO18
+#define BOARD_SPI_MISO     19              // SPI MISO on GPIO19
+#define BOARD_SPI_MOSI     23              // SPI MOSI on GPIO23
+#define BOARD_SPI_CS       5               // SPI chip select on GPIO5
 
-#define BOARD_I2C_SDA      21              // GPIO21（ESP32 I2C SDA 默认）
-#define BOARD_I2C_SCL      22              // GPIO22（ESP32 I2C SCL 默认）
+#define BOARD_I2C_SDA      21              // GPIO21 is the default ESP32 I2C SDA pin.
+#define BOARD_I2C_SCL      22              // GPIO22 is the default ESP32 I2C SCL pin.
 
-#define BOARD_LED_ENABLED  1               // 启用板载 LED
-#define BOARD_LED_PIN      2               // LED 引脚（GPIO2）
-#define BOARD_LED_INVERTED 0               // 高电平点亮
+#define BOARD_LED_ENABLED  1               // Enable the onboard LED.
+#define BOARD_LED_PIN      2               // LED on GPIO2
+#define BOARD_LED_INVERTED 0               // High turns the LED on.
 
-// ---- 性能与资源配置（ESP32 标准）----
-#define BOARD_VBAT_ADC_SAMPLES       16 // ADC采样次数 
-#define BOARD_LOG_DURATION           8  // 日志缓冲秒数
-#define BOARD_CONSOLE_LINES          50  // 控制台行数
-#define BOARD_CONSOLE_LINE_LEN       240  // 每行字符数
-#define BOARD_MAVLINK_TELEM_FAST_HZ  10  // MAVLink 快速遥测降速
-#define BOARD_WIFI_ENABLED           1  // WIFI开关
-#define BOARD_WEB_RC_ENABLED         1  // Web遥控器开关
+// ---- Standard ESP32 resource settings ----
+#define BOARD_VBAT_ADC_SAMPLES       16 // ADC samples per reading
+#define BOARD_LOG_DURATION           8  // Seconds of log data to keep
+#define BOARD_CONSOLE_LINES          50  // Number of console lines
+#define BOARD_CONSOLE_LINE_LEN       240  // Characters per line
+#define BOARD_MAVLINK_TELEM_FAST_HZ  10  // Fast MAVLink telemetry rate in Hz
+#define BOARD_WIFI_ENABLED           1  // Enable Wi-Fi.
+#define BOARD_WEB_RC_ENABLED         1  // Enable the web remote.
 
-// ---- 扩展板传感器----
-#define EXPANSION_BOARD_ENABLED      1 // 1 = 启用扩展板传感器探测（BMP388/VL53L1X/QMC5883L/PMW3901）;0 = 跳过探测，所有能力标志保持 false，不影响基础飞行功能
-#define BOARD_VL53_XSHUT_PIN   32          // VL53L1X XSHUT（GPIO32）
-#define BOARD_PMW_CS_PIN       33          // PMW3901 SPI CS（GPIO33）
+// ---- Expansion board sensors ----
+#define EXPANSION_BOARD_ENABLED      1 // Set to 1 to probe BMP388, VL53L1X, QMC5883L and PMW3901. With 0, sensor flags stay false and basic flight control still works.
+#define BOARD_VL53_XSHUT_PIN   32          // VL53L1X XSHUT (GPIO32)
+#define BOARD_PMW_CS_PIN       33          // PMW3901 SPI CS (GPIO33)
 
 #endif
 
-// ---- 兜底配置（未知芯片默认全开）----
+// ---- Fallback settings for other chips ----
 
-// ---- 扩展板总开关说明 ----
-//   1 = 启用扩展板传感器探测（BMP388/VL53L1X/QMC5883L/PMW3901）
-//   0 = 跳过探测，所有能力标志保持 false，不影响基础飞行功能
+// ---- Expansion board switch ----
+// Set to 1 to probe BMP388, VL53L1X, QMC5883L and PMW3901.
+// Set to 0 to skip detection. Sensor flags stay false and basic flight control still works.
 #if !defined(EXPANSION_BOARD_ENABLED)
-#define EXPANSION_BOARD_ENABLED 1  // 兜底：未知芯片默认启用
+#define EXPANSION_BOARD_ENABLED 1  // Enable by default on other chips.
 #endif
 
-// ---- WiFi / Web RC 开关兜底（未知芯片默认全开）----
+// ---- Enable Wi-Fi and the web remote by default on other chips. ----
 #if !defined(BOARD_WIFI_ENABLED)
 #define BOARD_WIFI_ENABLED   1
 #endif

@@ -1,25 +1,24 @@
-// 电池电压检测
-// Battery voltage monitoring
+// Battery voltage monitor
 
 #include "board_config.h"
 
-#define VBAT_ADC_PIN       BOARD_VBAT_ADC_PIN     // 电池电压采样引脚
-#define VBAT_ADC_SAMPLES   BOARD_VBAT_ADC_SAMPLES  // ADC采样数：C3=8（减少阻塞）/ ESP32&S3=16（更低噪声）
-#define VBAT_DIVIDER       (43.0f / 33.0f)  // 分压比：上桥10kΩ+下桥33kΩ，公式 Vbat = Vadc × 43/33
-#define VBAT_WARN_THRESHOLD     3.5f  // L1：空载/怠速预警门限（V）
-#define VBAT_LOW_THRESHOLD      3.3f  // L2：飞行中低电告警门限（V）
-#define VBAT_CRITICAL_THRESHOLD 3.0f  // L3：飞行中危急门限，自动降落（V）
-#define VBAT_ABSENT_THRESHOLD   0.5f  // 低于此值视为未接电池，忽略所有告警
+#define VBAT_ADC_PIN       BOARD_VBAT_ADC_PIN     // Battery voltage input pin
+#define VBAT_ADC_SAMPLES   BOARD_VBAT_ADC_SAMPLES  // Use 8 ADC samples on C3 to reduce delays, or 16 on ESP32 and S3 to reduce noise.
+#define VBAT_DIVIDER       (43.0f / 33.0f)  // Voltage divider with 10 kΩ above and 33 kΩ below. Vbat = Vadc × 43/33.
+#define VBAT_WARN_THRESHOLD     3.5f  // L1 warning threshold at idle or with no load (V)
+#define VBAT_LOW_THRESHOLD      3.3f  // L2 low-battery threshold in flight (V)
+#define VBAT_CRITICAL_THRESHOLD 3.0f  // L3 critical threshold for automatic landing in flight (V)
+#define VBAT_ABSENT_THRESHOLD   0.5f  // Below this voltage, assume the battery is disconnected and skip warnings.
 
-#define BATTERY_FLYING_THRUST_MIN    0.15f  // 推力≥此值视为飞行中，L1不适用
-#define BATTERY_ACTION_DEBOUNCE_TIME  0.9f  // 低压连续判定防抖时间（秒）
+#define BATTERY_FLYING_THRUST_MIN    0.15f  // At or above this thrust, use the in-flight thresholds instead of L1.
+#define BATTERY_ACTION_DEBOUNCE_TIME  0.9f  // Seconds the voltage must stay low before protection takes effect
 
 extern float t;
-float batteryVoltage = 0.0f;  // 全局最新电压，由 updateBatteryVoltage() 定期刷新
+float batteryVoltage = 0.0f;  // Latest voltage from updateBatteryVoltage()
 
 void updateBatteryVoltage() {
 	static float lastCheck = 0;
-	if (t - lastCheck < 0.5f) return;  // 每 0.5 秒采样一次
+	if (t - lastCheck < 0.5f) return;  // Sample every 0.5 seconds.
 	lastCheck = t;
 	batteryVoltage = readBatteryVoltage();
 }

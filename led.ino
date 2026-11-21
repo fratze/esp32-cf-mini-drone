@@ -1,15 +1,14 @@
-// 板载LED灯控制
-// Board's LED control
+// Onboard status LED
 
 #include "board_config.h"
 
 #if BOARD_LED_ENABLED
 
-#define BLINK_PERIOD      500000  // 慢闪：500ms 半周期 → 1 Hz
-#define BLINK_FAST_PERIOD  62500  // 快闪：62.5ms 半周期 → 8 Hz
+#define BLINK_PERIOD      500000  // Slow blink at 1 Hz (500 ms half-period)
+#define BLINK_FAST_PERIOD  62500  // Fast blink at 8 Hz (62.5 ms half-period)
 
 
-// ---- 外部依赖声明 ----
+// ---- External declarations ----
 extern bool armed;
 extern float t;
 extern float controlTime;
@@ -25,7 +24,7 @@ bool isUsingWebRC();
 
 void setupLED() {
 	pinMode(BOARD_LED_PIN, OUTPUT);
-	digitalWrite(BOARD_LED_PIN, BOARD_LED_INVERTED ? HIGH : LOW); // 初始熄灭
+	digitalWrite(BOARD_LED_PIN, BOARD_LED_INVERTED ? HIGH : LOW); // Start with the LED off.
 }
 
 void setLED(bool on) {
@@ -41,26 +40,26 @@ void blinkLED() {
 	setLED(micros() / BLINK_PERIOD % 2);
 }
 
-// 电池告警：按飞行状态选择阈值
-// 飞行中（thrustTarget >= 0.15）→ L2（2.8V），L1 在飞行中不适用
-// 未解锁 / 解锁怠速 → L1（3.4V）
+// Select the low-battery warning threshold for the flight state.
+// In flight (thrustTarget >= 0.15), use L2.
+// When disarmed or idling, use L1.
 bool batteryAlertActive() {
 	if (batteryVoltage <= VBAT_ABSENT_THRESHOLD) return false;
 	bool flying = armed && thrustTarget >= 0.15f;
-	if (flying) return batteryVoltage < VBAT_LOW_THRESHOLD;   // L2：飞行中
-	else        return batteryVoltage < VBAT_WARN_THRESHOLD;   // L1：未解锁/怠速
+	if (flying) return batteryVoltage < VBAT_LOW_THRESHOLD;   // L2 in flight
+	else        return batteryVoltage < VBAT_WARN_THRESHOLD;   // L1 when disarmed or idling
 }
 
-// 检测是否有任意告警（低电 / 遥控失联 / 倒置）
+// Check for low battery, lost control signal or an upside-down aircraft.
 bool ledAlertActive() {
-	// 倒置检测
+	// Check for an upside-down aircraft.
 	if (isInverted) return true;
 
-	// 遥控失联检测（SBUS RC，仅解锁后）
+	// Check the radio receiver for signal loss while armed.
 	if (controlTime != 0 && armed && (t - controlTime > rcLossTimeout)) return true;
 
 #if WEB_RC_ENABLED
-	// Web RC 失联检测：已激活但超时
+	// Check whether an active web remote has timed out.
 	if (webRCEnabled && useWebRC && !isUsingWebRC()) return true;
 #endif
 
@@ -69,24 +68,24 @@ bool ledAlertActive() {
 	return false;
 }
 
-// 主循环调用：根据飞行状态驱动 LED
+// Update the LED from the main loop.
 void updateLED() {
 	if (!armed) {
 		if (batteryAlertActive()) {
-			setLED(micros() / BLINK_FAST_PERIOD % 2); // 解锁前低电：快闪
+			setLED(micros() / BLINK_FAST_PERIOD % 2); // Blink fast if the battery is low before arming.
 		} else {
-			setLED(false); // 正常待机：常灭
+			setLED(false); // Keep the LED off in normal standby.
 		}
 		return;
 	}
 	if (ledAlertActive()) {
-		setLED(micros() / BLINK_FAST_PERIOD % 2); // 任何告警：快闪 8Hz
+		setLED(micros() / BLINK_FAST_PERIOD % 2); // Blink at 8 Hz for warnings.
 	} else {
-		setLED(micros() / BLINK_PERIOD % 2); // 正常飞行：慢闪 1Hz
+		setLED(micros() / BLINK_PERIOD % 2); // Blink at 1 Hz during normal flight.
 	}
 }
 
-#else // BOARD_LED_ENABLED == 0（ESP32-C3 无板载 LED）
+#else // LED support is disabled.
 
 void setupLED() {}
 void setLED(bool on) {}

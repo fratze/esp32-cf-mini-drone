@@ -1,5 +1,4 @@
-// PID控制器实现
-// PID controller implementation
+// PID controller
 
 #pragma once
 

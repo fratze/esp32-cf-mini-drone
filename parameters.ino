@@ -1,33 +1,34 @@
-// 参数存储在闪存
-// Parameters storage in flash memory
+// Store parameters in flash.
 
 #include <Preferences.h>
-#include <nvs_flash.h> // nvs_flash_init()/nvs_flash_erase()：当 Preferences.begin() 失败时用于擦除重建 NVS
+#include <nvs_flash.h> // Erase and reinitialize NVS if Preferences.begin() fails.
 #include "util.h"
 
 extern float channelZero[16];
 extern float channelMax[16];
 extern float rollChannel, pitchChannel, throttleChannel, yawChannel, modeChannel;
-extern int wifiMode, udpLocalPort, udpRemotePort;
 extern int motorPins[4];
 extern int pwmFrequency, pwmResolution, pwmStop, pwmMin, pwmMax;
 extern float motThrMin;
 extern float motThrMax;
+#if WIFI_ENABLED
+extern int wifiMode, udpLocalPort, udpRemotePort;
 extern int mavlinkSysId;
 extern Rate telemetrySlow, telemetryFast;
+#endif
 extern float rcLossTimeout, descendTime;
 extern int flightModes[3];
 extern Vector accBias, accScale;
 extern Vector imuRotation;
 extern LowPassFilter<Vector> gyroBiasFilter;
 extern int rcRxPin;
-extern int rcProtocol;   // 遥控协议：0=SBUS, 1=CRSF(ELRS)
-extern int rcTxPin;      // 遥测回传 TX 引脚，-1=不启用
-extern int rcBaud;       // 串口波特率
-extern float trimRoll, trimPitch;         // 软件配平参数，定义于 control.ino
-extern float levelGateThreshold;         // 摇杆门控阈值，定义于 estimate.ino
-extern float levelBiasGain;              // Mahony I 项增益，定义于 estimate.ino
-extern Vector levelGyroBias;             // Mahony 虚拟陀螺偏置，定义于 estimate.ino
+extern int rcProtocol;   // RC protocol (0 = SBUS, 1 = CRSF/ELRS)
+extern int rcTxPin;      // Telemetry TX pin (-1 disables it)
+extern int rcBaud;       // Serial baud rate
+extern float trimRoll, trimPitch;         // Trim settings from control.ino
+extern float levelGateThreshold;         // Stick threshold from estimate.ino
+extern float levelBiasGain;              // Mahony integral gain from estimate.ino
+extern Vector levelGyroBias;             // Estimated Mahony gyro bias from estimate.ino
 
 Preferences storage;
 
@@ -44,168 +45,170 @@ struct Parameter {
 };
 
 Parameter parameters[] = {
-	// ===== 控制（角速率内环 PID）=====
-	// 角速率环直接控制机身旋转速度，是最内层控制回路。
-	// P：比例增益，值越大响应越快，过大会振荡；
-	// I：积分增益，消除稳态误差（如电机差异），过大会产生积分饱和；
-	// D：微分增益，抑制超调，过大会放大高频噪声；
-	// WU（windup）：积分饱和限制幅值，防止 I 项累积过大。
-	{"CTL_R_RATE_P",  &rollRatePID.p},      // 横滚角速率 P 增益（rad/s → 力矩）
-	{"CTL_R_RATE_I",  &rollRatePID.i},      // 横滚角速率 I 增益
-	{"CTL_R_RATE_D",  &rollRatePID.d},      // 横滚角速率 D 增益
-	{"CTL_R_RATE_WU", &rollRatePID.windup}, // 横滚角速率积分限幅（±windup）
-	{"CTL_P_RATE_P",  &pitchRatePID.p},     // 俯仰角速率 P 增益
-	{"CTL_P_RATE_I",  &pitchRatePID.i},     // 俯仰角速率 I 增益
-	{"CTL_P_RATE_D",  &pitchRatePID.d},     // 俯仰角速率 D 增益
-	{"CTL_P_RATE_WU", &pitchRatePID.windup},// 俯仰角速率积分限幅
-	{"CTL_Y_RATE_P",  &yawRatePID.p},       // 偏航角速率 P 增益（偏航惯量小，通常需更大值）
-	{"CTL_Y_RATE_I",  &yawRatePID.i},       // 偏航角速率 I 增益
-	{"CTL_Y_RATE_D",  &yawRatePID.d},       // 偏航角速率 D 增益
+	// ===== Inner angular-rate PID loop =====
+	// The inner loop controls how fast the aircraft rotates.
+	// P sets response speed. Too much causes oscillation.
+	// I removes steady errors such as motor imbalance. Too much can cause windup.
+	// D reduces overshoot. Too much amplifies high-frequency noise.
+	// WU limits how far the integral term can build up.
+	{"CTL_R_RATE_P",  &rollRatePID.p},      // Roll rate P gain (rad/s to torque)
+	{"CTL_R_RATE_I",  &rollRatePID.i},      // Roll rate I gain
+	{"CTL_R_RATE_D",  &rollRatePID.d},      // Roll rate D gain
+	{"CTL_R_RATE_WU", &rollRatePID.windup}, // Roll rate integral limit (±windup)
+	{"CTL_P_RATE_P",  &pitchRatePID.p},     // Pitch rate P gain
+	{"CTL_P_RATE_I",  &pitchRatePID.i},     // Pitch rate I gain
+	{"CTL_P_RATE_D",  &pitchRatePID.d},     // Pitch rate D gain
+	{"CTL_P_RATE_WU", &pitchRatePID.windup},// Pitch rate integral limit
+	{"CTL_Y_RATE_P",  &yawRatePID.p},       // Yaw rate P gain (lower yaw inertia usually needs a higher value)
+	{"CTL_Y_RATE_I",  &yawRatePID.i},       // Yaw rate I gain
+	{"CTL_Y_RATE_D",  &yawRatePID.d},       // Yaw rate D gain
 
-	// ===== 控制（角度外环 PID）=====
-	// 角度环将目标姿态角误差转换为角速率指令，输出给内环。
-	// I 项用于自动补偿物理不对称引起的固定悬停偏差，需同时配置 WU 积分限幅才能生效。
-	{"CTL_R_P",  &rollPID.p},      // 横滚角度 P 增益（角度误差 rad → 角速率指令 rad/s）
-	{"CTL_R_I",  &rollPID.i},      // 横滚角度 I 增益，用于补偿物理不对称固定偏差（默认 0.5）
-	{"CTL_R_D",  &rollPID.d},      // 横滚角度 D 增益（一般为 0）
-	{"CTL_R_WU", &rollPID.windup}, // 横滚角度积分限幅（rad/s），I 项非 0 时必须配置，防止积分发散
-	{"CTL_P_P",  &pitchPID.p},     // 俯仰角度 P 增益
-	{"CTL_P_I",  &pitchPID.i},     // 俯仰角度 I 增益（默认 0.5）
-	{"CTL_P_D",  &pitchPID.d},     // 俯仰角度 D 增益（一般为 0）
-	{"CTL_P_WU", &pitchPID.windup},// 俯仰角度积分限幅（rad/s）
-	{"CTL_Y_P",  &yawPID.p},       // 偏航角度 P 增益
+	// ===== Outer angle PID loop =====
+	// The outer loop converts angle error into a rate command for the inner loop.
+	// The integral term corrects a steady hover offset. Set its WU limit to enable it.
+	{"CTL_R_P",  &rollPID.p},      // Roll angle P gain (angle error in rad to rate in rad/s)
+	{"CTL_R_I",  &rollPID.i},      // Roll angle I gain for steady hover offset
+	{"CTL_R_D",  &rollPID.d},      // Roll angle D gain (usually 0)
+	{"CTL_R_WU", &rollPID.windup}, // Roll integral limit (rad/s). Set this when I is nonzero to prevent windup.
+	{"CTL_P_P",  &pitchPID.p},     // Pitch angle P gain
+	{"CTL_P_I",  &pitchPID.i},     // Pitch angle I gain
+	{"CTL_P_D",  &pitchPID.d},     // Pitch angle D gain (usually 0)
+	{"CTL_P_WU", &pitchPID.windup},// Pitch integral limit (rad/s)
+	{"CTL_Y_P",  &yawPID.p},       // Yaw angle P gain
 
-	// ===== 控制（限制值）=====
-	{"CTL_P_RATE_MAX", &maxRate.y}, // 俯仰最大角速率限制（rad/s），超出摇杆指令会被截断
-	{"CTL_R_RATE_MAX", &maxRate.x}, // 横滚最大角速率限制（rad/s）
-	{"CTL_Y_RATE_MAX", &maxRate.z}, // 偏航最大角速率限制（rad/s）
-	{"CTL_TILT_MAX",   &tiltMax},   // 稳定模式最大允许倾斜角（rad），超出时角度外环被限幅
+	// ===== Control limits =====
+	{"CTL_P_RATE_MAX", &maxRate.y}, // Maximum pitch rate (rad/s). Stick commands are capped at this value.
+	{"CTL_R_RATE_MAX", &maxRate.x}, // Maximum roll rate (rad/s)
+	{"CTL_Y_RATE_MAX", &maxRate.z}, // Maximum yaw rate (rad/s)
+	{"CTL_TILT_MAX",   &tiltMax},   // Maximum tilt in stabilize mode (rad). Limits the outer angle loop.
 
-	// ===== 控制（软件配平）=====
-	// 用于补偿飞机重心偏移或电机推力不一致导致的悬停偏移，无需物理调整。
-	{"CTL_TRIM_ROLL",  &trimRoll},  // 横滚配平角（rad），正值向右滚，调整步长建议 0.005 rad
-	{"CTL_TRIM_PITCH", &trimPitch}, // 俯仰配平角（rad），正值向后仰，调整步长建议 0.005 rad
+	// ===== Software trim =====
+	// Trim corrects steady hover drift from uneven weight or motor thrust.
+	{"CTL_TRIM_ROLL",  &trimRoll},  // Roll trim (rad). Positive tilts right. Suggested step is 0.005 rad.
+	{"CTL_TRIM_PITCH", &trimPitch}, // Pitch trim (rad). Suggested step is 0.005 rad. See control.ino for the direction of correction.
 
-	// ===== 控制（飞行模式）=====
-	// 遥控器模式通道（RC_MODE）将摇杆三挡位映射到对应飞行模式枚举值：
-	// 0=RAW（直通），1=ACRO（特技），2=STAB（自稳），3=ALTHOLD（气压计定高），4=AUTO
-	{"CTL_FLT_MODE_0", &flightModes[0]}, // 模式通道第 0 挡对应的飞行模式
-	{"CTL_FLT_MODE_1", &flightModes[1]}, // 模式通道第 1 挡对应的飞行模式
-	{"CTL_FLT_MODE_2", &flightModes[2]}, // 模式通道第 2 挡对应的飞行模式
+	// ===== Flight modes =====
+	// RC_MODE maps each of the three switch positions to a flight mode.
+	// 0 = RAW (direct), 1 = ACRO, 2 = STAB (stabilize), 3 = ALTHOLD (barometric altitude hold), 4 = AUTO
+	{"CTL_FLT_MODE_0", &flightModes[0]}, // Flight mode for switch position 0
+	{"CTL_FLT_MODE_1", &flightModes[1]}, // Flight mode for switch position 1
+	{"CTL_FLT_MODE_2", &flightModes[2]}, // Flight mode for switch position 2
 
-	// ===== IMU（传感器安装旋转补偿）=====
-	// 若 IMU 安装方向与机体坐标系不一致，在此设置旋转角（rad）进行软件补偿。
-	{"IMU_ROT_ROLL",  &imuRotation.x}, // IMU 绕机体 X 轴（横滚轴）的安装偏转角（rad）
-	{"IMU_ROT_PITCH", &imuRotation.y}, // IMU 绕机体 Y 轴（俯仰轴）的安装偏转角（rad）
-	{"IMU_ROT_YAW",   &imuRotation.z}, // IMU 绕机体 Z 轴（偏航轴）的安装偏转角（rad）
+	// ===== IMU mounting orientation =====
+	// Set the mounting angles in radians if the IMU axes differ from the aircraft axes.
+	{"IMU_ROT_ROLL",  &imuRotation.x}, // IMU mounting angle about the body X (roll) axis in rad
+	{"IMU_ROT_PITCH", &imuRotation.y}, // IMU mounting angle about the body Y (pitch) axis in rad
+	{"IMU_ROT_YAW",   &imuRotation.z}, // IMU mounting angle about the body Z (yaw) axis in rad
 
-	// ===== IMU（陀螺仪偏置滤波）=====
-	// 陀螺仪静态偏置通过低通滤波器（指数移动平均）在上电初始化时估计。
-	// alpha 越小滤波越强（收敛越慢），越大收敛越快但对振动噪声更敏感。
-	{"IMU_GYRO_BIAS_A", &gyroBiasFilter.alpha}, // 陀螺偏置低通滤波器系数 alpha（0~1）
+	// ===== Gyro bias filter =====
+	// At startup, estimate stationary gyro bias with an exponential moving average.
+	// Lower alpha gives more smoothing but takes longer to settle. Higher alpha responds faster to vibration.
+	{"IMU_GYRO_BIAS_A", &gyroBiasFilter.alpha}, // Gyro bias filter coefficient alpha (0 to 1)
 
-	// ===== IMU（加速度计标定）=====
-	// 出厂或重新安装后需对加速度计进行六面标定，结果存入以下参数。
-	// 标定公式：acc_corrected = (acc_raw - bias) * scale
-	{"IMU_ACC_BIAS_X", &accBias.x},  // 加速度计 X 轴零偏（m/s²）
-	{"IMU_ACC_BIAS_Y", &accBias.y},  // 加速度计 Y 轴零偏（m/s²）
-	{"IMU_ACC_BIAS_Z", &accBias.z},  // 加速度计 Z 轴零偏（m/s²）
-	{"IMU_ACC_SCALE_X", &accScale.x}, // 加速度计 X 轴增益校正因子（无量纲，理想值为 1.0）
-	{"IMU_ACC_SCALE_Y", &accScale.y}, // 加速度计 Y 轴增益校正因子
-	{"IMU_ACC_SCALE_Z", &accScale.z}, // 加速度计 Z 轴增益校正因子
+	// ===== Accelerometer calibration =====
+	// Perform six-face calibration on a new or remounted sensor. These parameters store the results.
+	// Calibration formula: acc_corrected = (acc_raw - bias) * scale
+	{"IMU_ACC_BIAS_X", &accBias.x},  // Accelerometer X offset (m/s²)
+	{"IMU_ACC_BIAS_Y", &accBias.y},  // Accelerometer Y offset (m/s²)
+	{"IMU_ACC_BIAS_Z", &accBias.z},  // Accelerometer Z offset (m/s²)
+	{"IMU_ACC_SCALE_X", &accScale.x}, // Accelerometer X scale factor (unitless, ideally 1.0)
+	{"IMU_ACC_SCALE_Y", &accScale.y}, // Accelerometer Y scale factor
+	{"IMU_ACC_SCALE_Z", &accScale.z}, // Accelerometer Z scale factor
 
-	// ===== 姿态估计 =====
-	// 采用互补滤波：陀螺仪积分提供高频动态，加速度计提供低频重力修正。
-	{"EST_ACC_WEIGHT",   &accWeight},          // 加速度计对姿态的修正权重（0~1），越大修正越强，但对振动越敏感
-	{"EST_RATES_LPF_A",  &ratesFilter.alpha},  // 角速率低通滤波器系数 alpha（0~1），越小截止频率越低（约 40Hz@0.2）
-	{"EST_LVL_GATE_THR", &levelGateThreshold}, // 摇杆门控阈值（0~1），摇杆偏转超过此比例时 applyLevel 权重渐变为零，防止打杆后松杆漂移
-	{"EST_LVL_BIAS_GAIN",&levelBiasGain},      // Mahony I 项增益：重力误差积分进虚拟陀螺偏置的速率，越大收敛越快（约 30s@0.00002）
+	// ===== Attitude estimation =====
+	// A complementary filter tracks fast motion with the gyro and uses gravity for slow correction.
+	{"EST_ACC_WEIGHT",   &accWeight},          // Accelerometer correction weight (0 to 1). Higher values increase correction and vibration sensitivity.
+	{"EST_RATES_LPF_A",  &ratesFilter.alpha},  // Rate filter alpha (0 to 1). Lower values lower the cutoff (about 40 Hz at 0.2).
+	{"EST_LVL_GATE_THR", &levelGateThreshold}, // Stick threshold (0 to 1). Fade applyLevel correction to zero by this point to reduce drift after stick release.
+	{"EST_LVL_BIAS_GAIN",&levelBiasGain},      // Mahony integral gain sets how fast gravity error changes gyro bias. Settling takes about 30 s at 0.00002.
 
-	// ===== 电机（引脚配置）=====
-	// 修改后立即调用 setupMotors() 重新初始化 LEDC 通道，无需重启。
-	{"MOT_PIN_FL", &motorPins[MOTOR_FRONT_LEFT],  setupMotors}, // 左前电机 GPIO 引脚号
-	{"MOT_PIN_FR", &motorPins[MOTOR_FRONT_RIGHT], setupMotors}, // 右前电机 GPIO 引脚号
-	{"MOT_PIN_RL", &motorPins[MOTOR_REAR_LEFT],   setupMotors}, // 左后电机 GPIO 引脚号
-	{"MOT_PIN_RR", &motorPins[MOTOR_REAR_RIGHT],  setupMotors}, // 右后电机 GPIO 引脚号
+	// ===== Motor pins =====
+	// Pin changes call setupMotors() immediately to reconfigure LEDC without restarting.
+	{"MOT_PIN_FL", &motorPins[MOTOR_FRONT_LEFT],  setupMotors}, // Front left motor GPIO
+	{"MOT_PIN_FR", &motorPins[MOTOR_FRONT_RIGHT], setupMotors}, // Front right motor GPIO
+	{"MOT_PIN_RL", &motorPins[MOTOR_REAR_LEFT],   setupMotors}, // Rear left motor GPIO
+	{"MOT_PIN_RR", &motorPins[MOTOR_REAR_RIGHT],  setupMotors}, // Rear right motor GPIO
 
-	// ===== 电机（PWM 配置）=====
-	// 直驱 MOSFET 模式：pwmMax=-1，pwmStop/pwmMin=0，使用纯占空比控制。
-	// ESC 模式：pwmMax 设为脉宽上限（μs），pwmMin 设为脉宽下限，pwmFrequency 降至 400Hz。
-	{"MOT_PWM_FREQ", &pwmFrequency, setupMotors}, // PWM 频率（Hz），MOSFET 直驱建议 25000，ESC 建议 400
-	{"MOT_PWM_RES",  &pwmResolution, setupMotors},// PWM 分辨率（bit），决定 LEDC 计数上限为 2^n-1，常用 10bit
-	{"MOT_PWM_STOP", &pwmStop},                   // 电机停转时的 PWM 值；纯占空比模式下为 0，ESC 模式下为怠速脉宽（μs）
-	{"MOT_PWM_MIN",  &pwmMin},                    // 电机最小 PWM 值；纯占空比模式下为 0，ESC 模式下为最低脉宽（μs）
-	{"MOT_PWM_MAX",  &pwmMax},                    // 电机最大 PWM 值；-1=纯占空比模式（MOSFET），正整数=ESC 脉宽上限（μs）
+	// ===== Motor PWM settings =====
+	// For direct MOSFET drive use duty-cycle control with pwmMax=-1 and pwmStop=pwmMin=0.
+	// For an ESC, set pwmMax and pwmMin to the pulse-width limits in microseconds and use 400 Hz.
+	{"MOT_PWM_FREQ", &pwmFrequency, setupMotors}, // PWM frequency (Hz). Suggested values are 25000 for MOSFET drive and 400 for an ESC.
+	{"MOT_PWM_RES",  &pwmResolution, setupMotors},// PWM resolution in bits (usually 10). The maximum LEDC count is 2^n - 1.
+	{"MOT_PWM_STOP", &pwmStop},                   // Stopped motor output. Use 0 in duty-cycle mode or the idle pulse width in microseconds for an ESC.
+	{"MOT_PWM_MIN",  &pwmMin},                    // Minimum output. Use 0 in duty-cycle mode or the minimum ESC pulse width in microseconds.
+	{"MOT_PWM_MAX",  &pwmMax},                    // Maximum output. Use -1 for MOSFET duty-cycle mode or the maximum ESC pulse width in microseconds.
 
-	// ===== 电机（推力映射）=====
-	// 将归一化油门（0~1）线性映射到电机推力输出范围，保留余量供姿态修正使用。
-	{"MOT_THR_MIN", &motThrMin}, // 推力下限（0~1），摇杆最低位时的电机输出，建议≥0.05 防失速
-	{"MOT_THR_MAX", &motThrMax}, // 推力上限（0~1），摇杆最高位时的电机输出，建议≤0.9 保留姿态修正余量
+	// ===== Motor thrust range =====
+	// Map throttle (0 to 1) linearly into the motor output range and leave room for attitude corrections.
+	{"MOT_THR_MIN", &motThrMin}, // Output at minimum throttle (0 to 1). At least 0.05 is suggested to avoid stalls.
+	{"MOT_THR_MAX", &motThrMax}, // Output at maximum throttle (0 to 1). At most 0.9 is suggested to leave room for corrections.
 
-	// ===== 遥控（通道校准）=====
-	// 原始 RC 信号经校准转换为归一化值（-1~1 或 0~1）。
-	// channelZero[n]：摇杆中立点原始值；channelMax[n]：摇杆最大行程原始值。
-	// 校准公式：normalized = (raw - zero) / max
-	{"RC_ZERO_0", &channelZero[0]}, // 通道 0 中立点（校准用）
-	{"RC_ZERO_1", &channelZero[1]}, // 通道 1 中立点
-	{"RC_ZERO_2", &channelZero[2]}, // 通道 2 中立点
-	{"RC_ZERO_3", &channelZero[3]}, // 通道 3 中立点
-	{"RC_ZERO_4", &channelZero[4]}, // 通道 4 中立点
-	{"RC_ZERO_5", &channelZero[5]}, // 通道 5 中立点
-	{"RC_ZERO_6", &channelZero[6]}, // 通道 6 中立点
-	{"RC_ZERO_7", &channelZero[7]}, // 通道 7 中立点
-	{"RC_MAX_0",  &channelMax[0]},  // 通道 0 行程幅值（校准用）
-	{"RC_MAX_1",  &channelMax[1]},  // 通道 1 行程幅值
-	{"RC_MAX_2",  &channelMax[2]},  // 通道 2 行程幅值
-	{"RC_MAX_3",  &channelMax[3]},  // 通道 3 行程幅值
-	{"RC_MAX_4",  &channelMax[4]},  // 通道 4 行程幅值
-	{"RC_MAX_5",  &channelMax[5]},  // 通道 5 行程幅值
-	{"RC_MAX_6",  &channelMax[6]},  // 通道 6 行程幅值
-	{"RC_MAX_7",  &channelMax[7]},  // 通道 7 行程幅值
+	// ===== Radio channel calibration =====
+	// Calibration converts raw radio readings to -1 to 1 or 0 to 1.
+	// channelZero[n] stores the neutral reading. channelMax[n] stores the reading at full travel.
+	// Calibration formula: normalized = (raw - zero) / (max - zero)
+	{"RC_ZERO_0", &channelZero[0]}, // Channel 0 neutral
+	{"RC_ZERO_1", &channelZero[1]}, // Channel 1 neutral
+	{"RC_ZERO_2", &channelZero[2]}, // Channel 2 neutral
+	{"RC_ZERO_3", &channelZero[3]}, // Channel 3 neutral
+	{"RC_ZERO_4", &channelZero[4]}, // Channel 4 neutral
+	{"RC_ZERO_5", &channelZero[5]}, // Channel 5 neutral
+	{"RC_ZERO_6", &channelZero[6]}, // Channel 6 neutral
+	{"RC_ZERO_7", &channelZero[7]}, // Channel 7 neutral
+	{"RC_MAX_0",  &channelMax[0]},  // Channel 0 travel
+	{"RC_MAX_1",  &channelMax[1]},  // Channel 1 travel
+	{"RC_MAX_2",  &channelMax[2]},  // Channel 2 travel
+	{"RC_MAX_3",  &channelMax[3]},  // Channel 3 travel
+	{"RC_MAX_4",  &channelMax[4]},  // Channel 4 travel
+	{"RC_MAX_5",  &channelMax[5]},  // Channel 5 travel
+	{"RC_MAX_6",  &channelMax[6]},  // Channel 6 travel
+	{"RC_MAX_7",  &channelMax[7]},  // Channel 7 travel
 
-	// ===== 遥控（通道功能映射）=====
-	// 指定各功能轴使用的物理通道编号（0-based 整数）。
-	{"RC_ROLL",     &rollChannel},     // 横滚通道编号
-	{"RC_PITCH",    &pitchChannel},    // 俯仰通道编号
-	{"RC_THROTTLE", &throttleChannel}, // 油门通道编号
-	{"RC_YAW",      &yawChannel},      // 偏航通道编号
-	{"RC_MODE",     &modeChannel},     // 飞行模式切换通道编号（三挡拨杆）
+	// ===== Radio channel assignments =====
+	// Choose the physical channel for each control, counting from zero.
+	{"RC_ROLL",     &rollChannel},     // Roll channel
+	{"RC_PITCH",    &pitchChannel},    // Pitch channel
+	{"RC_THROTTLE", &throttleChannel}, // Throttle channel
+	{"RC_YAW",      &yawChannel},      // Yaw channel
+	{"RC_MODE",     &modeChannel},     // Three-position flight mode switch channel
 
-	// ===== 遥控（串口硬件配置）=====
-	// 四个参数均绑定 setupRC 回调：修改后立即重新初始化 RC 串口，无需重启即可生效。
-	{"RC_RX_PIN",   &rcRxPin,    setupRC}, // 遥控接收器数据输入 GPIO 引脚（UART RX）
-	{"RC_PROTOCOL", &rcProtocol, setupRC}, // 遥控协议：0=SBUS（电平反相），1=CRSF/ELRS（正逻辑 420000 baud）
-	{"RC_TX_PIN",   &rcTxPin,    setupRC}, // 遥测回传 GPIO 引脚（UART TX）；-1=不启用回传
-	{"RC_BAUD",     &rcBaud,     setupRC}, // 遥控串口波特率（bps）；SBUS=100000，CRSF=420000
+	// ===== Receiver serial port settings =====
+	// Changing any of these four parameters calls setupRC() immediately to reconfigure the port.
+	{"RC_RX_PIN",   &rcRxPin,    setupRC}, // Receiver input GPIO (UART RX)
+	{"RC_PROTOCOL", &rcProtocol, setupRC}, // RC protocol: 0 = SBUS (inverted), 1 = CRSF/ELRS (non-inverted, 420000 baud)
+	{"RC_TX_PIN",   &rcTxPin,    setupRC}, // Return telemetry GPIO (UART TX). Use -1 to disable it.
+	{"RC_BAUD",     &rcBaud,     setupRC}, // Radio baud rate (100000 for SBUS, 420000 for CRSF)
 
-	// ===== WiFi =====
-	{"WIFI_MODE",     &wifiMode},      // WiFi 工作模式：0=关闭，1=STA（连接已有热点），2=AP（自建热点）
-	{"WIFI_LOC_PORT", &udpLocalPort},  // 本地 UDP 监听端口（地面站发送到此端口）
-	{"WIFI_REM_PORT", &udpRemotePort}, // 远端 UDP 目标端口（飞控主动发送到此端口）
+#if WIFI_ENABLED
+	// ===== Wi-Fi settings =====
+	{"WIFI_MODE",     &wifiMode},      // Wi-Fi mode: 0 = off, 1 = create an access point, 2 = join an existing network
+	{"WIFI_LOC_PORT", &udpLocalPort},  // Local UDP port for messages from the ground station
+	{"WIFI_REM_PORT", &udpRemotePort}, // Remote UDP port for messages from the flight controller
 
-	// ===== MAVLink 遥测 =====
-	{"MAV_SYS_ID",    &mavlinkSysId},       // MAVLink 系统 ID（1~254），区分多机时需唯一
-	{"MAV_RATE_SLOW", &telemetrySlow.rate}, // 慢速遥测发送频率（Hz），用于心跳、电池等低频数据
-	{"MAV_RATE_FAST", &telemetryFast.rate}, // 快速遥测发送频率（Hz），用于姿态、角速率等高频数据
+	// ===== MAVLink telemetry =====
+	{"MAV_SYS_ID",    &mavlinkSysId},       // MAVLink system ID (1 to 254). Use a different ID for each aircraft.
+	{"MAV_RATE_SLOW", &telemetrySlow.rate}, // Slow telemetry rate in Hz for heartbeats, battery readings and similar data
+	{"MAV_RATE_FAST", &telemetryFast.rate}, // Fast telemetry rate in Hz for attitude and angular rate
+#endif
 
-	// ===== 故障保护 =====
-	{"SF_RC_LOSS_TIME",  &rcLossTimeout}, // RC 信号丢失超时阈值（秒），超时后进入自动下降模式
-	{"SF_DESCEND_TIME",  &descendTime},   // 自动下降至油门归零所需时间（秒），越小下降越快
+	// ===== Failsafe settings =====
+	{"SF_RC_LOSS_TIME",  &rcLossTimeout}, // Seconds without an RC signal before automatic descent
+	{"SF_DESCEND_TIME",  &descendTime},   // Seconds to reduce throttle to zero during descent. Lower values descend faster.
 };
 
 void setupParameters() {
 	print("Setup parameters\n");
 	if (!storage.begin("flix", false)) {
-		// Preferences.begin() 内部 nvs_flash_init() 失败会直接返回 false（常见于分区表变更/NVS数据版本不兼容/异常断电导致的NVS损坏），
-		// 此时按 ESP-IDF 标准做法擦除分区后重试，否则会永久静默失败（所有参数都无法持久化）。
-		print("[NVS] Preferences.begin 失败，尝试擦除 NVS 分区并重新初始化...\n");
+		// Preferences.begin() returns false if NVS initialization fails, for example after a partition change, an incompatible NVS version or power loss.
+		// Erase the partition and retry so later parameter writes can succeed.
+		print("[NVS] Could not open settings. Erasing the NVS partition and trying again...\n");
 		nvs_flash_erase();
 		esp_err_t err = nvs_flash_init();
-		print("[NVS] nvs_flash_init 重试结果: err=%d\n", err);
+		print("[NVS] nvs_flash_init retry returned %d\n", err);
 		if (!storage.begin("flix", false)) {
-			print("[NVS] 二次初始化仍然失败，参数将无法持久化，请检查分区表/硬件！\n");
+			print("[NVS] Setup failed again. Settings cannot be saved. Check the partition table and hardware.\n");
 		} else {
-			print("[NVS] 擦除重建成功，参数将从代码默认值重新开始（旧数据已丢失，需重新执行 ca/cr 等标定）\n");
+			print("[NVS] Storage rebuilt. Old settings were erased. Defaults are active. Repeat calibration with ca and cr.\n");
 		}
 	}
 	// Read parameters from storage
@@ -214,7 +217,7 @@ void setupParameters() {
 			storage.putFloat(parameter.name, parameter.getValue()); // store default value
 		}
 		float stored = storage.getFloat(parameter.name, parameter.getValue());
-		// 整型参数若读到 NaN（flash 损坏），回退到代码默认值并重写
+		// If a damaged flash entry gives NaN for an integer parameter, restore and save the default.
 		if (parameter.integer && !isfinite(stored)) {
 			stored = (float)parameter.getValue();
 			storage.putFloat(parameter.name, stored);
@@ -268,7 +271,7 @@ void syncParameters() {
 		if (parameter.getValue() == parameter.cache) continue;
 		if (isnan(parameter.getValue()) && isnan(parameter.cache)) continue; // handle NAN != NAN
 		size_t written = storage.putFloat(parameter.name, parameter.getValue());
-		if (written != sizeof(float)) continue; // 写入失败时不更新cache，保留旧值，下一轮 1Hz 周期自动重试
+		if (written != sizeof(float)) continue; // On write failure, keep the old cached value and retry on the next 1 Hz update.
 		parameter.cache = parameter.getValue();
 	}
 }

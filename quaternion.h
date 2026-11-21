@@ -1,5 +1,4 @@
-// 轻量级旋转四元数库
-// Lightweight rotation quaternion library
+// Lightweight quaternion rotation library
 
 #pragma once
 

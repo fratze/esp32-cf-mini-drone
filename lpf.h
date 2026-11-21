@@ -1,5 +1,4 @@
-// 低通滤波器实现
-// Low pass filter implementation
+// Low-pass filter
 
 #pragma once
 

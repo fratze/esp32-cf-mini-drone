@@ -1,80 +1,46 @@
-ESP32无人机飞控固件  
-支持手机网页遥控、琛光RC1开源遥控、CRSF(ELRS)/SBUS协议航模遥控、MAVLINK协议遥控。
+# CHERGLOW CF-Drone
 
-# 硬件资料
+Flight controller firmware for ESP32 mini drones. You can fly with the web remote on a phone, a radio receiver using CRSF (ELRS) or SBUS, or a ground station using MAVLink. The firmware comes from the [CHERGLOW CF-Drone open-source project](https://oshwhub.com/songge8/project_qqqyfdkm).
 
-## 适配硬件
-已适配ESP32/ESP32-S3  
-支持6500/9250姿态传感器
+## Build the firmware
 
-## 官方硬件
-完美适配琛光E1系列无人机
+1. Open `esp32-cf-mini-drone.ino` in Arduino IDE 2.3.x or later.
+2. In Boards Manager, install **esp32 by Espressif Systems** version **3.3.1**. In Library Manager, install **MAVLink** version **2.0.35**.
+3. Select the board that matches your chip and click **Verify** to compile.
 
-### 琛光E1_MINI 开源无人机
-工程文档 https://oshwhub.com/songge8/project_qqqyfdkm  
-购买套件 https://item.taobao.com/item.htm?ft=t&id=1098812979567  
-支持官方扩展模块，可定高、悬停。
+With the same board package and library installed, you can also compile from the repository directory with Arduino CLI. For a standard ESP32, run:
 
-### 琛光E1_Nano 超小无人机
-工程文档 https://oshwhub.com/songge8/project_fnvbukbz  
-购买套件 https://item.taobao.com/item.htm?ft=t&id=1099763930032
+```sh
+arduino-cli compile --fqbn esp32:esp32:esp32 .
+```
 
-### 琛光RC1 开源遥控
-硬件开源，飞控端适配代码即将更新，可使用官方固件体验  
-工程文档 https://oshwhub.com/songge8/project_wajhbuzm
+For an ESP32-S3, use `esp32:esp32:esp32s3`. For an ESP32-C3, use `esp32:esp32:esp32c3`. The C3 configuration disables Wi-Fi and the web remote by default.
 
-# 更新日志
+## Hardware
 
-## 20260718
-优化参数存储
+The firmware supports MPU6500 and MPU9250 motion sensors. Board-specific pins are listed in `board_config.h`.
 
-## 20260624
-优化配置分类
+| CHERGLOW hardware | Details | Links |
+| --- | --- | --- |
+| E1_MINI | Open-source mini drone. The official expansion module is designed for altitude hold and hovering. This firmware currently falls back to stabilize mode when the web remote requests altitude hold. | [Hardware files](https://oshwhub.com/songge8/project_qqqyfdkm) · [Kit](https://item.taobao.com/item.htm?ft=t&id=1098812979567) |
+| E1_Nano | Extra-small drone in the E1 series. | [Hardware files](https://oshwhub.com/songge8/project_fnvbukbz) · [Kit](https://item.taobao.com/item.htm?ft=t&id=1099763930032) |
+| RC1 | Open-source radio controller. The original project directs RC1 users to its official firmware while flight controller support is being updated. | [Hardware files](https://oshwhub.com/songge8/project_wajhbuzm) |
 
-## 20260618
-优化网页遥控提示等
+## Change log
 
-## 20260617
-* 优化IMU故障处理
-
-## 20260521
-* 优化姿态控制
-
-## 20260520
-* 优化PWM频率，减轻MOS管压力
-
-## 20260515
-* 优化电压检测精度
-* 更合理的低电保护阈值
-
-## 20260430
-* 优化电量报警逻辑，低电禁止解锁、自动上锁、自动降落
-* 油门推力控制逻辑优化，增加油门推力上下限参数MOT_THR_MIN和MOT_THR_MAX
-* 优化网页遥控界面
-
-## 20260428
-* 适配ESP32-S3
-
-## 20260417
-* 修复调试日志显示不全的BUG，并优化提示命令显示
-
-## 20260416
-* 降低遥控器调试常规日志的打印频率
-* 服务端无法准确的监控网络信号质量，前端已经准确实现，清理服务端的网络监控
-
-## 20260415
-* 增加LED状态提示，开发板状态LED解锁慢闪，低电、失联等警告状态快闪
-* 电机引脚参数化，可通过调试控制台设置
-* WIFI用户名密码参数化，可通过调试控制台设置
-* 修复网络延迟计算逻辑错误
-* 适当提高网页遥控发包频率到20Hz,为了不影响性能，建议不要超过20Hz
-* 更新一些常规功能
-
-## 20260328
-* 重构WEB遥控器底层逻辑
-* 清理WEB遥控器服务端冗余
-
-## 20260327
-* 大幅优化WEB遥控器
-* 添加web遥控器调试功能
-* 增加倒置保护，飞机长时间倒置判定为异常，停机避免损失扩大
+| Date | Changes |
+| --- | --- |
+| 2026-07-18 | Improved how settings are saved. |
+| 2026-06-24 | Reorganized settings by category. |
+| 2026-06-18 | Improved messages on the web remote. |
+| 2026-06-17 | Improved handling of motion sensor (IMU) faults. |
+| 2026-05-21 | Improved attitude control. |
+| 2026-05-20 | Adjusted the motor PWM frequency to reduce stress on the MOSFETs. |
+| 2026-05-15 | Improved battery voltage readings and adjusted the low-battery thresholds. |
+| 2026-04-30 | Updated low-battery protection to block arming, disarm at idle or land automatically, depending on flight state and voltage. Added minimum and maximum thrust settings (`MOT_THR_MIN` and `MOT_THR_MAX`) and updated the web remote. |
+| 2026-04-28 | Added ESP32-S3 support. |
+| 2026-04-17 | Fixed cut-off debug logs and improved the command help. |
+| 2026-04-16 | Reduced routine remote-control logging. Removed the server's inaccurate network quality estimate. The web remote measures link quality in the browser. |
+| 2026-04-15 | Added status LED patterns. A slow blink means armed, and a fast blink signals a warning such as low battery or a lost connection. Made motor pins and Wi-Fi credentials configurable from the console. Fixed the latency calculation and raised the web remote update rate to 20 Hz. The project recommends staying at or below 20 Hz for performance. Also updated general features. |
+| 2026-03-28 | Reworked the web remote and removed redundant server code. |
+| 2026-03-27 | Improved the web remote and added debugging tools. Added protection that stops the motors if the drone stays upside down too long. |
